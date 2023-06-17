@@ -1,9 +1,3 @@
-/*
-Para compilar incluir la librería m (matemáticas)
-Ejemplo:
-gcc -o mercator mercator.c -lm
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,18 +5,20 @@ gcc -o mercator mercator.c -lm
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/shm.h>
-
+#include <semaphore.h>
 
 #define NPROCS 4
 #define SERIES_MEMBER_COUNT 200000
-
 
 double *sums;
 double x = 1.0;
 int *proc_count;
 int *start_all;
+int *completed;
 double *res;
 
+sem_t mutex;
+sem_t all_started;
 
 double get_member(int n, double x) {
     int i;
@@ -37,11 +33,10 @@ double get_member(int n, double x) {
         numerator / n;
 }
 
-
 void proc(int proc_num) {
     int i;
 
-    while(!(*start_all));
+    sem_wait(&all_started);
 
     sums[proc_num] = 0;
 
@@ -49,17 +44,27 @@ void proc(int proc_num) {
         sums[proc_num] += get_member(i + 1, x);
     }
 
+    sem_wait(&mutex);
     (*proc_count)++;
+    sem_post(&mutex);
+
+    // Incrementa el contador de procesos completados
+    sem_wait(&mutex);
+    (*completed)++;
+    sem_post(&mutex);
+
     exit(0);
 }
-
 
 void master_proc() {
     int i;
     sleep(1);
-    *start_all = 1;
+    sem_post(&all_started);
 
-    while (*proc_count != NPROCS);// busy wait until all threads are done with computation of partial sums
+    while (*completed != NPROCS) {
+        // Espera hasta que todos los procesos esclavos hayan terminado
+        usleep(10000); // Agrega una pequeña pausa para liberar el CPU
+    }
 
     *res = 0;
 
@@ -83,18 +88,23 @@ int main() {
     int shmid;
     void *shmstart;
 
-    size_t size_shmid = NPROCS * sizeof(double) + 2 * sizeof(int);
+    size_t size_shmid = NPROCS * sizeof(double) + 4 * sizeof(int);
 
     shmid = shmget(0x1234, size_shmid, 0666 | IPC_CREAT);
     shmstart = shmat(shmid, NULL, 0);
     sums = shmstart;
 
-    proc_count = shmstart + NPROCS * sizeof(double);
-    start_all = proc_count + sizeof(int);
-    res = shmstart + size_shmid;
+    proc_count = (int *)(sums + NPROCS);
+    start_all = (int *)(proc_count + 1);
+    completed = (int *)(start_all + 1);
+    res = (double *)(completed + 1);
 
     *proc_count = 0;
     *start_all = 0;
+    *completed = 0;
+
+    sem_init(&mutex, 1, 1);
+    sem_init(&all_started, 1, 0);
 
     gettimeofday(&ts, NULL);
     start_ts = ts.tv_sec; // Tiempo inicial
@@ -128,6 +138,11 @@ int main() {
     printf("El resultado es %10.8f\n", *res);
     printf("Llamando a la función ln(1 + %f) = %10.8f\n", x, log(1+x));
 
+    sem_destroy(&mutex);
+    sem_destroy(&all_started);
+
     shmdt(shmstart);
     shmctl(shmid, IPC_RMID, NULL);
+
+    return 0;
 }
