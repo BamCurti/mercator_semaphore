@@ -71,10 +71,11 @@ void master_proc() {
     semsignal(semarr, SYNC);
 
     //while (*proc_count != NPROCS);// busy wait until all threads are done with computation of partial sums
-    semwait(semarr, EXMUT);
-    semwait(semarr, EXMUT);
-    semwait(semarr, EXMUT);
-    semwait(semarr, EXMUT);
+    for (i - 0; i < NPROCS; i++)
+    	semwait(semarr, EXMUT);
+    
+    
+    
 
     *res = 0;
 
@@ -140,6 +141,8 @@ int main() {
     printf("Tiempo = %lld segundos\n", elapsed_time);
     printf("El resultado es %10.8f\n", *res);
     printf("Llamando a la función ln(1 + %f) = %10.8f\n", x, log(1+x));
+    
+    erasesem(semarr);
 
     shmdt(shmstart);
     shmctl(shmid, IPC_RMID, NULL);
